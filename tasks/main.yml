@@ -1,0 +1,162 @@
+---
+- name: Apt - Update du cache
+  apt:
+    update_cache: yes
+  ignore_errors: yes
+    
+- name: Installation des dependances
+  apt:
+    name: [build-essential, apache2, php, openssl, perl, make, php-gd, libgd2-xpm-dev, libapache2-mod-php, libperl-dev, libssl-dev, daemon, wget, apache2-utils, unzip]
+    state: latest
+
+- name: Installation de la dependance Ansible Python-passlib
+  apt: "pkg=python-passlib state=latest"
+
+- name: Ajout du groupe Nagios nagioscmd
+  group:
+    name: nagcmd
+    state: present
+
+- name: Ajout du compte de service nagios
+  user:
+    name: nagios
+    comment: Nagios Service Account
+    groups: nagcmd,www-data
+    uid: 1010
+
+- name: Telechargement de Nagios
+  get_url: 
+    url: https://assets.nagios.com/downloads/nagioscore/releases/nagios-4.4.5.tar.gz
+    dest: /tmp/
+
+- name: Telechargement des plugins Nagios
+  get_url:
+    url: https://nagios-plugins.org/download/nagios-plugins-2.3.2.tar.gz
+    dest: /tmp/
+
+- name: Decompression de Nagios
+  unarchive:
+    src: /tmp/nagios-4.4.5.tar.gz
+    dest: /tmp/
+    remote_src: yes
+
+- name: Configuration et compilation de Nagios
+  shell: 
+    cmd: "{{ item }}"
+    chdir: /tmp/nagios-4.4.5/
+  with_items:
+    - ./configure --with-nagios-group=nagios --with-command-group=nagcmd --with-httpd_conf=/etc/apache2/sites-enabled/
+    - make all
+    - make install
+    - make install-init
+    - make install-config
+    - make install-commandmode
+    - make install-webconf
+
+- name: Configuration du fichier de contacts Nagios
+  copy:
+    src: contacts.cfg
+    dest: /usr/local/nagios/etc/objects/contacts.cfg
+    force: yes
+
+- name: Creation du compte nagiosadmin 
+  htpasswd:
+    path: /usr/local/nagios/etc/htpasswd.users
+    name: nagiosadmin
+    password: 'Prevert-77'
+
+- name: Activation du module cgi
+  apache2_module:
+    state: present
+    name: cgi
+
+- name: Redemarrage du service apache2
+  service: 
+    name: apache2 
+    state: restarted
+    enabled: yes
+  tags:
+    - restart_apache
+
+- name: Decompression des plugins Nagios
+  unarchive:
+    src: /tmp/nagios-plugins-2.3.2.tar.gz
+    dest: /tmp/
+    remote_src: yes
+
+- name: Configuration et compilation des plugins Nagios
+  shell:
+    cmd: "{{ item }}"
+    chdir: /tmp/nagios-plugins-2.3.2/
+  with_items:
+    - ./configure --with-nagios-user=nagios --with-nagios-group=nagios
+    - make
+    - make install
+
+- name: Activation et redemarrage du service nagios
+  service: 
+    name: nagios
+    state: restarted
+    enabled: yes
+  tags:
+    - restart_nagios
+
+- name: Installation de PHP CLI
+  apt:
+    name: [php-cli, php7.0-cli]
+    state: latest
+  tags:
+    - vshell_install
+
+- name: Telechargement de Nagios vShell interface
+  get_url:
+    url: https://github.com/NagiosEnterprises/nagiosvshell/archive/v2.0.0-416.tar.gz
+    dest: /tmp/
+  tags:
+    - vshell_install
+
+- name: Decompression de Nagios vShell Interface
+  unarchive:
+    src: /tmp/nagiosvshell-2.0.0-416.tar.gz
+    dest: /tmp/
+    remote_src: yes
+  tags:
+    - vshell_install
+
+- name: Configuration de vShell
+  copy:
+    src: config.php
+    dest: /tmp/nagiosvshell-2.0.0-416/
+  tags:
+    - vshell_install
+
+- name: Changement des permissions install.php
+  file:
+    path: /tmp/nagiosvshell-2.0.0-416/install.php
+    owner: root
+    group: root
+    mode: "0770"
+  tags:
+    - vshell_install
+
+- name: Execution du script d'installation vShell
+  shell: 
+    cmd: /usr/bin/php7.0 install.php
+    chdir: /tmp/nagiosvshell-2.0.0-416/ 
+  tags:
+    - vshell_install
+
+- name: Configuration Apache pour vshell2
+  copy:
+    src: vshell2.conf
+    dest: /etc/apache2/sites-enabled/vshell2.conf
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o=r"
+  tags:
+    - vshell_install
+
+- name: Redemarrage du service apache2
+  service: name="apache2" state="restarted" enabled="yes"
+  tags:
+    - vshell_install
